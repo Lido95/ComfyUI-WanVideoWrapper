@@ -1,4 +1,3 @@
-# Copyright 2024-2025 The Alibaba Wan Team Authors. All rights reserved.
 import torch
 
 try:
@@ -13,6 +12,7 @@ try:
 except ModuleNotFoundError:
     FLASH_ATTN_2_AVAILABLE = False
 
+# Mock sageattention if not installed
 try:
     from sageattention import sageattn
     @torch.compiler.disable()
@@ -24,17 +24,29 @@ try:
 except Exception as e:
     print(f"Warning: Could not load sageattention: {str(e)}")
     if isinstance(e, ModuleNotFoundError):
-        print("sageattention package is not installed")
-    elif isinstance(e, ImportError) and "DLL" in str(e):
-        print("sageattention DLL loading error")
+        print("sageattention package is not installed, mocking it with fallback")
+
     sageattn_func = None
+
+# 添加一个简单的备用attention函数，防止后面调用报错
+def fallback_attention(q, k, v, attn_mask=None, dropout_p=0, is_causal=False):
+    # 简单的点积注意力实现（非高效，仅为兼容）
+    attn_scores = torch.matmul(q, k.transpose(-2, -1))
+    if attn_mask is not None:
+        attn_scores = attn_scores.masked_fill(attn_mask == 0, float('-inf'))
+    attn_probs = torch.nn.functional.softmax(attn_scores, dim=-1)
+    attn_probs = torch.nn.functional.dropout(attn_probs, p=dropout_p)
+    return torch.matmul(attn_probs, v)
+
+if sageattn_func is None:
+    sageattn_func = fallback_attention
+
 import warnings
 
 __all__ = [
     'flash_attention',
     'attention',
 ]
-
 
 def flash_attention(
     q,
